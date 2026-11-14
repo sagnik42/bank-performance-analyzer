@@ -1,0 +1,450 @@
+<title>Bank Performance Analyzer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+/* Layout: data-source strip first (load any bank), then bank chips that double as the chart legend, KPI strip, trend grid, peer table, auto-written insights. */
+:root{
+  --plane:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,.10); --wash:rgba(11,11,11,.045);
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300;
+  --good:#0ca30c; --warn:#fab219; --crit:#d03b3b; --accent:#184f95;
+  --font:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --plane:#0d0d0d; --surface:#1a1a19; --ink:#f0efec; --ink2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10); --wash:rgba(255,255,255,.055);
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --accent:#6da7ec; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --plane:#0d0d0d; --surface:#1a1a19; --ink:#f0efec; --ink2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10); --wash:rgba(255,255,255,.055);
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --accent:#6da7ec; color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--plane);color:var(--ink);font-family:var(--font);font-size:14px;line-height:1.45;padding-block:0 48px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:1280px;margin:0 auto}
+h1,h2,h3,p{margin:0}
+button,input,textarea,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--s1);outline-offset:2px}
+.top{padding:22px 0 14px;display:flex;flex-wrap:wrap;gap:8px 24px;justify-content:space-between;align-items:flex-end}
+.top h1{font-size:22px;font-weight:600;letter-spacing:-.01em;text-wrap:balance}
+.top p{color:var(--ink2);font-size:13px;margin-top:2px}
+.tag{border:1px solid var(--border);padding:2px 8px;border-radius:3px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink2);background:var(--surface)}
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:16px;min-width:0}
+.panel h2{font-size:15px;font-weight:600}
+.sub{font-size:12px;color:var(--ink2);margin-bottom:10px}
+.btn{background:var(--surface);border:1px solid var(--axis);border-radius:4px;padding:6px 12px;cursor:pointer;color:var(--ink)}
+.btn:hover{background:var(--wash)}
+.btn.pri{background:var(--ink);color:var(--surface);border-color:var(--ink);font-weight:500}
+.btn.pri:hover{opacity:.88;background:var(--ink)}
+.src{display:flex;flex-direction:column;gap:12px;margin-bottom:16px}
+.srcrow{display:flex;flex-wrap:wrap;gap:10px 12px;align-items:center}
+.srcrow .grow{flex:1;min-width:200px}
+.status{font-size:13px;color:var(--ink2)}
+.status.err{color:var(--crit)}
+.status.ok{color:var(--ink)}
+.msgs{margin:0;padding-left:18px;font-size:12px;color:var(--ink2)}
+.msgs.bad{color:var(--crit)}
+.unit{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink2)}
+.unit input{width:110px;padding:5px 8px;border:1px solid var(--axis);border-radius:4px;background:var(--surface)}
+details.how{border-top:1px solid var(--border);padding-top:10px}
+details.how summary{cursor:pointer;font-weight:500;font-size:13px}
+.howgrid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:16px;margin-top:10px}
+@media (max-width:860px){.howgrid{grid-template-columns:minmax(0,1fr)}}
+textarea#paste{width:100%;min-height:150px;resize:vertical;border:1px solid var(--axis);border-radius:4px;padding:8px;background:var(--plane);font-family:var(--mono);font-size:12px}
+pre.tpl{margin:0;overflow-x:auto;border:1px solid var(--border);border-radius:4px;padding:10px;background:var(--plane);font-family:var(--mono);font-size:11.5px;line-height:1.5}
+.cols{font-size:12px;color:var(--ink2);margin:8px 0 0}
+.cols code{font-family:var(--mono);color:var(--ink)}
+
+.chips{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 16px;position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--plane);padding:10px 0;border-block:1px solid var(--border)}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:30;background:var(--plane)}
+.chips .lbl{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink2);margin-right:4px}
+.chip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--axis);border-radius:4px;padding:5px 12px;background:var(--surface);cursor:pointer;color:var(--ink2)}
+.chip i{width:10px;height:10px;border-radius:2px;display:inline-block;opacity:.35}
+.chip[aria-pressed="true"]{color:var(--ink);border-color:var(--ink);font-weight:500}
+.chip[aria-pressed="true"] i{opacity:1}
+.chip.prim::after{content:"KPI focus";font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink2);border-left:1px solid var(--axis);padding-left:8px;font-weight:400}
+@media (max-width:720px){.chips{position:static}}
+
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--border);border:1px solid var(--border);margin-bottom:16px}
+@media (max-width:980px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.tile{background:var(--surface);padding:14px 16px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.tile .k{font-size:12px;color:var(--ink2)}
+.tile .v{font-size:26px;font-weight:500;letter-spacing:-.015em;line-height:1.2;overflow-wrap:anywhere}
+.tile .row{display:flex;justify-content:space-between;align-items:flex-end;gap:8px;margin-top:4px}
+.tile .d{font-size:12px;color:var(--ink2);display:flex;gap:6px;align-items:baseline;flex-wrap:wrap}
+.tile .d .gl{font-size:10px}
+@media (max-width:420px){.tile .v{font-size:22px}}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:16px}
+@media (max-width:900px){.grid{grid-template-columns:minmax(0,1fr)}}
+.chart{position:relative;width:100%}
+.chart svg{display:block;overflow:visible}
+.tick{fill:var(--ink2);font-size:11px}
+.endl{font-size:11px;font-weight:500;fill:var(--ink)}
+.gl-line{stroke:var(--grid)}.ax-line{stroke:var(--axis)}
+.tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--axis);border-radius:4px;padding:8px 10px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.12);z-index:5;display:none;white-space:nowrap;min-width:130px}
+.tip b{display:block;margin-bottom:4px}
+.tip .r{display:flex;justify-content:space-between;gap:16px}
+.tip .r span:first-child{color:var(--ink2)}
+.tip i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+.tip .n{font-variant-numeric:tabular-nums;font-weight:500}
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--border);white-space:nowrap;font-variant-numeric:tabular-nums}
+th:first-child,td:first-child{text-align:left}
+thead th{padding:0;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink2);font-weight:500;border-bottom:1px solid var(--axis)}
+thead th button{background:none;border:0;cursor:pointer;padding:8px 10px;width:100%;text-align:inherit;letter-spacing:inherit;text-transform:inherit;font-size:inherit;color:inherit}
+thead th button:hover{background:var(--wash)}
+thead th[aria-sort] button{color:var(--ink);font-weight:600}
+td .sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:8px}
+td.best{font-weight:600}
+.ins{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:10px}
+.ins li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:baseline;max-width:90ch}
+.ins .g{font-weight:700;width:14px;text-align:center}
+.empty{padding:40px 16px;text-align:center;color:var(--ink2)}
+.note{margin-top:8px;font-size:12px;color:var(--ink2);max-width:90ch}
+details.dt summary{cursor:pointer;font-size:12px;color:var(--ink2);padding:6px 0}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Bank Performance Analyzer</h1>
+      <p>Load any bank's quarterly figures and get KPIs, trends, peer comparison and written insights.</p>
+    </div>
+    <span class="tag" id="srcTag">Sample data</span>
+  </header>
+
+  <section class="panel src" aria-label="Data source">
+    <div class="srcrow">
+      <button class="btn pri" type="button" id="btnFile">Upload Excel or CSV</button>
+      <input type="file" id="file" accept=".csv,.tsv,.txt,.xlsx,.xls" hidden>
+      <button class="btn" type="button" id="btnPasteToggle">Paste from Excel</button>
+      <button class="btn" type="button" id="btnSample">Reset to sample banks</button>
+      <label class="unit" for="unit">Amounts in <input id="unit" type="text" value="₹ crore" maxlength="16"></label>
+    </div>
+    <p class="status" id="status" role="status"></p>
+    <ul class="msgs" id="msgs" hidden></ul>
+    <details class="how" id="how">
+      <summary>Data format and paste box</summary>
+      <div class="howgrid">
+        <div>
+          <p class="sub">Paste rows copied from Excel or a CSV, header row included, then press Load.</p>
+          <textarea id="paste" aria-label="Paste data" placeholder="Bank,Period,Deposits,Advances,..."></textarea>
+          <div class="srcrow" style="margin-top:8px"><button class="btn pri" type="button" id="btnLoad">Load pasted data</button></div>
+        </div>
+        <div>
+          <p class="sub">One row per bank per period, oldest first. Only Bank and Period are required. Any empty column is skipped.</p>
+          <pre class="tpl" id="tpl"></pre>
+          <div class="srcrow" style="margin-top:8px"><button class="btn" type="button" id="btnCopy">Copy template</button><span class="status" id="copied" aria-live="polite"></span></div>
+          <p class="cols">Amounts: <code>Deposits Advances NII OtherIncome Opex Provisions PAT</code> · Percentages as plain numbers: <code>CASA GNPA NNPA NIM CAR</code>. Credit-deposit ratio, cost-to-income and credit cost are calculated.</p>
+        </div>
+      </div>
+    </details>
+  </section>
+
+  <div id="dash"></div>
+</div>
+
+<script>
+/* ===== METRICS ===== */
+const KEYS=['dep','adv','casa','nii','oi','opex','prov','pat','gnpa','nnpa','nim','car'];
+const ALIAS={bank:'bank',bankname:'bank',period:'period',quarter:'period',date:'period',
+  deposits:'dep',totaldeposits:'dep',dep:'dep',advances:'adv',loans:'adv',grossadvances:'adv',adv:'adv',
+  casa:'casa',casapct:'casa',casaratio:'casa',nii:'nii',netinterestincome:'nii',otherincome:'oi',noninterestincome:'oi',oi:'oi',
+  opex:'opex',operatingexpenses:'opex',provisions:'prov',provisionsandcontingencies:'prov',prov:'prov',
+  pat:'pat',netprofit:'pat',profitaftertax:'pat',gnpa:'gnpa',gnpapct:'gnpa',grossnpa:'gnpa',nnpa:'nnpa',nnpapct:'nnpa',netnpa:'nnpa',
+  nim:'nim',nimpct:'nim',netinterestmargin:'nim',car:'car',carpct:'car',capitaladequacy:'car',capitaladequacyratio:'car'};
+const nn=v=>v!=null&&isFinite(v);
+const METRICS=[
+ {k:'dep',l:'Deposits',t:'amt',up:1,g:r=>r.dep},
+ {k:'adv',l:'Advances',t:'amt',up:1,g:r=>r.adv},
+ {k:'pat',l:'Net profit (quarter)',t:'amt',up:1,g:r=>r.pat},
+ {k:'nim',l:'Net interest margin',t:'pct',d:2,up:1,g:r=>r.nim},
+ {k:'casa',l:'CASA ratio',t:'pct',d:1,up:1,g:r=>r.casa},
+ {k:'gnpa',l:'Gross NPA',t:'pct',d:2,up:-1,g:r=>r.gnpa},
+ {k:'nnpa',l:'Net NPA',t:'pct',d:2,up:-1,g:r=>r.nnpa},
+ {k:'cti',l:'Cost-to-income',t:'pct',d:1,up:-1,g:r=>nn(r.opex)&&nn(r.nii)&&nn(r.oi)&&(r.nii+r.oi)>0?r.opex/(r.nii+r.oi)*100:null},
+ {k:'cd',l:'Credit-deposit ratio',t:'pct',d:1,up:0,g:r=>nn(r.adv)&&nn(r.dep)&&r.dep>0?r.adv/r.dep*100:null},
+ {k:'cc',l:'Credit cost (annualised)',t:'pct',d:2,up:-1,g:r=>nn(r.prov)&&nn(r.adv)&&r.adv>0?r.prov*4/r.adv*100:null},
+ {k:'car',l:'Capital adequacy',t:'pct',d:1,up:1,g:r=>r.car}
+];
+const MK=Object.fromEntries(METRICS.map(m=>[m.k,m]));
+const TILES=['dep','adv','pat','nim','casa','gnpa','cti','car'];
+const CHARTS=['dep','adv','pat','nim','gnpa','casa','cti','car'];
+const IN=n=>Math.round(n).toLocaleString('en-IN');
+const fmt=(m,v)=>!nn(v)?'–':m.t==='amt'?IN(v):v.toFixed(m.d)+'%';
+const tick=(m,v)=>m.t==='amt'?IN(v):v.toFixed(m.d===2?1:m.d);
+
+/* ===== PARSING ===== */
+function splitLine(line,del){
+  const out=[];let cur='',q=false;
+  for(let i=0;i<line.length;i++){const c=line[i];
+    if(q){if(c==='"'){if(line[i+1]==='"'){cur+='"';i++}else q=false}else cur+=c}
+    else if(c==='"')q=true;else if(c===del){out.push(cur);cur=''}else cur+=c}
+  out.push(cur);return out;
+}
+function textToTable(text){
+  const lines=text.replace(/^﻿/,'').split(/\r?\n/).filter(l=>l.trim());
+  if(!lines.length)return [];
+  const del=lines[0].includes('\t')?'\t':lines[0].includes(';')&&!lines[0].includes(',')?';':',';
+  return lines.map(l=>splitLine(l,del));
+}
+function tableToData(t){
+  const errors=[],warns=[];
+  if(t.length<2)return {errors:['No data rows found. Include a header row and at least one data row.']};
+  const hmap=t[0].map(h=>ALIAS[String(h).toLowerCase().replace(/[^a-z]/g,'')]||null);
+  const bi=hmap.indexOf('bank'),pi=hmap.indexOf('period');
+  if(bi<0||pi<0)return {errors:['The header row needs a "Bank" column and a "Period" column.']};
+  const found=hmap.filter(x=>x&&x!=='bank'&&x!=='period');
+  if(!found.length)return {errors:['No metric columns recognised. Use names like Deposits, Advances, NIM, GNPA.']};
+  const unknown=t[0].filter((h,i)=>!hmap[i]&&String(h).trim());
+  if(unknown.length)warns.push('Ignored columns: '+unknown.join(', '));
+  const rows=new Map();
+  for(let r=1;r<t.length;r++){
+    const row=t[r];if(!row||row.every(c=>String(c??'').trim()===''))continue;
+    const bank=String(row[bi]??'').trim(),period=String(row[pi]??'').trim();
+    if(!bank||!period){errors.push(`Row ${r+1}: Bank or Period is empty.`);continue}
+    const o={period};
+    hmap.forEach((k,i)=>{
+      if(!k||k==='bank'||k==='period')return;
+      const raw=String(row[i]??'').trim();if(raw==='')return;
+      const v=Number(raw.replace(/[,%₹$\s]/g,''));
+      if(!isFinite(v))errors.push(`Row ${r+1}: "${raw}" in ${t[0][i]} is not a number.`);else o[k]=v;
+    });
+    const key=bank+'\u0000'+period;
+    if(rows.has(key))warns.push(`Duplicate ${bank} / ${period}; the last row was used.`);
+    rows.set(key,{bank,o});
+  }
+  if(errors.length)return {errors:errors.slice(0,6).concat(errors.length>6?[`…and ${errors.length-6} more.`]:[])};
+  const banks=[],by={},periods=[];
+  rows.forEach(({bank,o})=>{
+    if(!by[bank]){if(banks.length>=6){return}banks.push(bank);by[bank]=[]}
+    by[bank].push(o);if(!periods.includes(o.period))periods.push(o.period);
+  });
+  const all=new Set([...rows.values()].map(x=>x.bank));
+  if(all.size>6)warns.push(`Only the first 6 banks are loaded (${all.size} found).`);
+  return {data:{banks,by,periods},warns,found};
+}
+
+/* ===== SAMPLE DATA (fictional) ===== */
+function sampleTable(){
+  const cfg=[
+    ['Sample Bank A',[150000,.021,.67,43.5,3.9,2.8,47,.85]],
+    ['Sample Bank B',[98000,.026,.74,37.5,3.2,4.1,54,1.0]],
+    ['Sample Bank C',[230000,.017,.64,46.8,4.2,1.9,41,.8]]
+  ];
+  const P=['Q3 FY24','Q4 FY24','Q1 FY25','Q2 FY25','Q3 FY25','Q4 FY25','Q1 FY26','Q2 FY26','Q3 FY26','Q4 FY26','Q1 FY27','Q2 FY27'];
+  const t=[['Bank','Period','Deposits','Advances','CASA','NII','OtherIncome','Opex','Provisions','PAT','GNPA','NNPA','NIM','CAR']];
+  cfg.forEach(([name,[d0,g,cd,casa0,nim0,gn0,cti0,pc],bi])=>{
+    P.forEach((p,i)=>{
+      const w=Math.sin(i*1.2+name.length),dep=d0*Math.pow(1+g,i)*(1+.004*w);
+      const adv=dep*(cd+.004*i+.006*Math.cos(i*.9));
+      const nim=nim0-.012*i+.05*w,casa=casa0-.18*i+.4*w,gnpa=gn0-.07*i+.05*Math.cos(i*1.4);
+      const nii=nim/400*dep*1.12,oi=nii*(.3+.03*Math.sin(i*.8)),opex=(nii+oi)*(cti0+.15*i+.8*Math.cos(i*1.7))/100;
+      const prov=adv*.0013*(gnpa/2.5)*(1+.2*Math.sin(i*2.3)),pat=(nii+oi-opex-prov)*.75;
+      t.push([name,p,dep,adv,casa,nii,oi,opex,prov,pat,gnpa,gnpa*.27,nim,15.2+.1*i+.2*w].map((v,j)=>j<2?v:(+v).toFixed(j<=3||j===5||j===6||j===7||j===8||j===9?0:2)));
+    });
+  });
+  return t;
+}
+
+/* ===== STATE ===== */
+const S={data:null,sel:[],unit:'₹ crore',sort:{k:'bank',dir:1},isSample:true};
+const $=id=>document.getElementById(id);
+function setStatus(msg,cls,msgs,bad){
+  const s=$('status');s.textContent=msg;s.className='status '+(cls||'');
+  const m=$('msgs');m.hidden=!(msgs&&msgs.length);m.className='msgs'+(bad?' bad':'');
+  m.innerHTML=(msgs||[]).map(x=>`<li>${x.replace(/</g,'&lt;')}</li>`).join('');
+}
+function apply(res,label,sample){
+  if(res.errors){setStatus('Could not load that data. Nothing was changed.','err',res.errors,true);return false}
+  S.data=res.data;S.isSample=!!sample;
+  S.sel=res.data.banks.slice(0,sample?3:Math.min(2,res.data.banks.length));
+  const n=res.data.banks.length,p=res.data.periods.length;
+  setStatus(`${label}: ${n} bank${n>1?'s':''}, ${p} period${p>1?'s':''}.`,'ok',res.warns);
+  $('srcTag').textContent=sample?'Sample data':'Your data';
+  try{if(!sample)localStorage.setItem('bpa-data',JSON.stringify(res.data))}catch(e){}
+  render();return true;
+}
+function loadSample(){
+  try{localStorage.removeItem('bpa-data')}catch(e){}
+  apply(tableToData(sampleTable()),'Sample banks loaded (fictional figures)',true);
+}
+
+/* ===== CHARTS ===== */
+const charts=[];
+const ro=new ResizeObserver(es=>es.forEach(e=>{const c=charts.find(c=>c.el===e.target);if(c&&Math.abs(c.w-e.contentRect.width)>1)c.draw()}));
+const col=b=>`var(--s${S.data.banks.indexOf(b)+1})`;
+function niceTicks(min,max,n){
+  const span=(max-min)||Math.abs(max)||1,raw=span/n,p=Math.pow(10,Math.floor(Math.log10(raw))),f=raw/p;
+  const step=(f<=1?1:f<=2?2:f<=2.5?2.5:f<=5?5:10)*p,lo=Math.floor(min/step)*step,hi=Math.ceil(max/step)*step,t=[];
+  for(let v=lo;v<=hi+step/2;v+=step)t.push(+v.toFixed(6));return t;
+}
+function lineChart(id,m,periods,series){
+  const el=$(id);
+  const c={el,w:0,draw(){
+    const W=Math.max(el.clientWidth,240),H=230;c.w=W;
+    const mg={l:m.t==='amt'?58:44,r:series.length<=4?64:12,t:12,b:26},iw=W-mg.l-mg.r,ih=H-mg.t-mg.b,n=periods.length;
+    let mn=Infinity,mx=-Infinity;series.forEach(s=>s.v.forEach(v=>{if(nn(v)){mn=Math.min(mn,v);mx=Math.max(mx,v)}}));
+    if(!isFinite(mn)){el.innerHTML='<p class="sub">No data for this metric.</p>';return}
+    const pad=(mx-mn)*.15||Math.abs(mx)*.1||1,ticks=niceTicks(mn-pad,mx+pad,4),y0=ticks[0],y1=ticks[ticks.length-1];
+    const X=i=>mg.l+(n===1?iw/2:i*iw/(n-1)),Y=v=>mg.t+ih-(v-y0)/(y1-y0)*ih,k=Math.ceil(n/6);
+    let g=ticks.map(v=>`<line class="gl-line" x1="${mg.l}" x2="${W-mg.r}" y1="${Y(v)}" y2="${Y(v)}"/><text class="tick" x="${mg.l-8}" y="${Y(v)+4}" text-anchor="end">${tick(m,v)}</text>`).join('');
+    g+=`<line class="ax-line" x1="${mg.l}" x2="${W-mg.r}" y1="${mg.t+ih}" y2="${mg.t+ih}"/>`;
+    g+=periods.map((l,i)=>(n-1-i)%k===0?`<text class="tick" x="${X(i)}" y="${H-6}" text-anchor="${i===0&&n>2?'start':'middle'}">${l}</text>`:'').join('');
+    const ends=[];
+    series.forEach(s=>{
+      let d='',pen=false,last=-1;
+      s.v.forEach((v,i)=>{if(nn(v)){d+=(pen?' L':' M')+X(i)+','+Y(v);pen=true;last=i}else pen=false});
+      g+=`<path d="${d}" fill="none" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" style="stroke:${s.c}"/>`;
+      if(last>=0){g+=`<circle cx="${X(last)}" cy="${Y(s.v[last])}" r="4" style="fill:${s.c};stroke:var(--surface)" stroke-width="2"/>`;ends.push({y:Y(s.v[last])+4,t:fmt(m,s.v[last])})}
+    });
+    if(series.length<=4){ends.sort((a,b)=>a.y-b.y);for(let i=1;i<ends.length;i++)if(ends[i].y-ends[i-1].y<14)ends[i].y=ends[i-1].y+14;
+      g+=ends.map(e=>`<text class="endl" x="${W-mg.r+10}" y="${e.y}">${e.t}</text>`).join('')}
+    el.innerHTML=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${m.l} by period">${g}<g class="hv"></g><rect x="${mg.l}" y="${mg.t}" width="${iw}" height="${ih}" fill="transparent" style="touch-action:pan-y"/></svg>`;
+    const tip=document.createElement('div');tip.className='tip';el.appendChild(tip);
+    const hv=el.querySelector('.hv'),ov=el.querySelector('rect');
+    const move=e=>{
+      const r=ov.getBoundingClientRect(),i=Math.max(0,Math.min(n-1,Math.round((e.clientX-r.left)/r.width*(n-1))));
+      hv.innerHTML=`<line x1="${X(i)}" x2="${X(i)}" y1="${mg.t}" y2="${mg.t+ih}" style="stroke:var(--axis)"/>`+series.map(s=>nn(s.v[i])?`<circle cx="${X(i)}" cy="${Y(s.v[i])}" r="4.5" style="fill:${s.c};stroke:var(--surface)" stroke-width="2"/>`:'').join('');
+      tip.innerHTML=`<b>${periods[i]}</b>`+series.map(s=>`<div class="r"><span><i style="background:${s.c}"></i>${s.name}</span><span class="n">${fmt(m,s.v[i])}</span></div>`).join('');
+      tip.style.display='block';const w=tip.offsetWidth;tip.style.left=(X(i)+14+w>W?Math.max(0,X(i)-14-w):X(i)+14)+'px';tip.style.top='6px';
+    };
+    ov.addEventListener('pointermove',move);ov.addEventListener('pointerdown',move);
+    ov.addEventListener('pointerleave',()=>{hv.innerHTML='';tip.style.display='none'});
+  }};
+  charts.push(c);c.draw();ro.observe(el);
+}
+function spark(v){
+  const a=v.filter(nn);if(a.length<2)return '';
+  const w=96,h=30,mn=Math.min(...a),mx=Math.max(...a),X=i=>2+i*(w-4)/(a.length-1),Y=x=>h-3-(x-mn)/((mx-mn)||1)*(h-8);
+  const pts=a.map((x,i)=>`${X(i)},${Y(x)}`);
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true" style="flex:none"><path d="M${X(0)},${h-1} L${pts.join(' L')} L${X(a.length-1)},${h-1}Z" style="fill:var(--s1);opacity:.12"/><path d="M${pts.join(' L')}" fill="none" stroke-width="1.75" stroke-linejoin="round" style="stroke:var(--s1)"/><circle cx="${X(a.length-1)}" cy="${Y(a[a.length-1])}" r="3" style="fill:var(--s1);stroke:var(--surface)" stroke-width="1.5"/></svg>`;
+}
+
+/* ===== ANALYSIS ===== */
+function series(bank,m){return S.data.periods.map(p=>{const r=S.data.by[bank].find(x=>x.period===p);return r?m.g(r):null})}
+function lastIdx(arr){for(let i=arr.length-1;i>=0;i--)if(nn(arr[i]))return i;return -1}
+function change(bank,m){
+  const rows=S.data.by[bank],v=rows.map(r=>m.g(r)),i=lastIdx(v);
+  if(i<0)return null;
+  const ri=i>=4&&nn(v[i-4])?i-4:i>=1&&nn(v[i-1])?i-1:-1;
+  return {cur:v[i],prev:ri>=0?v[ri]:null,ref:ri<0?'':ri===i-4?'year ago':'prior period',period:rows[i].period,hist:v};
+}
+function deltaTxt(m,c){
+  if(!c||c.prev==null)return {txt:'No comparison period',cls:'',arrow:''};
+  const diff=c.cur-c.prev;let t;
+  if(m.t==='amt')t=(c.prev?((c.cur/c.prev-1)*100).toFixed(1)+'%':'n/a');
+  else if(m.k==='nim')t=Math.abs(diff*100).toFixed(0)+' bps';
+  else t=Math.abs(diff).toFixed(2)+' pp';
+  const sign=diff>=0?'+':'−';if(m.t==='amt'&&c.prev)t=(diff>=0?'+':'−')+t.replace('-','');else t=sign+t;
+  const good=m.up===0?null:(diff>=0)===(m.up>0);
+  return {txt:`${t} vs ${c.ref}`,good,arrow:diff>=0?'▲':'▼'};
+}
+function insights(bank){
+  const out=[],g=k=>change(bank,MK[k]);
+  const dep=g('dep'),adv=g('adv'),nim=g('nim'),gn=g('gnpa'),cti=g('cti'),casa=g('casa'),pat=g('pat'),car=g('car'),cd=g('cd');
+  const pct=c=>c&&c.prev?(c.cur/c.prev-1)*100:null;
+  const dp=pct(dep),ap=pct(adv);
+  if(dp!=null&&ap!=null){
+    const ref=dep.ref,lead=ap>dp?'Credit grew faster than deposits':'Deposits grew faster than credit';
+    out.push(['n',`${lead}: advances ${ap>=0?'+':''}${ap.toFixed(1)}% against deposits ${dp>=0?'+':''}${dp.toFixed(1)}% over the ${ref}${cd?`, taking the credit-deposit ratio to ${cd.cur.toFixed(1)}%`:''}.`]);
+  }
+  if(nim&&nim.prev!=null){const b=(nim.cur-nim.prev)*100;
+    out.push([b>=3?'g':b<=-3?'b':'n',`Net interest margin ${Math.abs(b)<3?'was broadly flat':(b>0?'expanded by ':'compressed by ')+Math.abs(b).toFixed(0)+' bps'} to ${nim.cur.toFixed(2)}% versus the ${nim.ref}${casa&&casa.prev!=null?`, while CASA ${casa.cur>=casa.prev?'rose':'fell'} ${Math.abs(casa.cur-casa.prev).toFixed(1)} pp to ${casa.cur.toFixed(1)}%`:''}.`])}
+  if(gn&&gn.prev!=null){const d=gn.cur-gn.prev;
+    out.push([d<=-.05?'g':d>=.05?'b':'n',`Asset quality ${Math.abs(d)<.05?'is stable':d<0?'improved':'weakened'}: gross NPA is ${gn.cur.toFixed(2)}% (${d>=0?'+':'−'}${Math.abs(d).toFixed(2)} pp vs ${gn.ref}).`])}
+  if(cti&&cti.prev!=null){const d=cti.cur-cti.prev;
+    out.push([d<=-.5?'g':d>=.5?'b':'n',`Cost-to-income is ${cti.cur.toFixed(1)}%, ${Math.abs(d)<.5?'little changed':d<0?'down '+Math.abs(d).toFixed(1)+' pp (more efficient)':'up '+d.toFixed(1)+' pp (less efficient)'} versus the ${cti.ref}.`])}
+  if(pat&&pat.prev){const p=pct(pat);out.push([p>=5?'g':p<=-5?'b':'n',`Quarterly net profit is ${IN(pat.cur)}, ${p>=0?'up':'down'} ${Math.abs(p).toFixed(1)}% on the ${pat.ref}.`])}
+  if(car&&car.cur!=null)out.push([car.cur>=14?'g':car.cur>=11.5?'n':'b',`Capital adequacy is ${car.cur.toFixed(1)}%, ${car.cur>=11.5?'above':'below'} the 11.5% RBI minimum including the conservation buffer.`]);
+  return out;
+}
+function peerInsights(){
+  const out=[],sel=S.sel;if(sel.length<2)return out;
+  const best=(k,hi)=>{const a=sel.map(b=>({b,v:change(b,MK[k])})).filter(x=>x.v);if(a.length<2)return null;a.sort((x,y)=>hi?y.v.cur-x.v.cur:x.v.cur-y.v.cur);return a[0]};
+  [['nim',1,'highest net interest margin'],['casa',1,'strongest CASA ratio'],['gnpa',0,'lowest gross NPA'],['cti',0,'lowest cost-to-income']].forEach(([k,hi,t])=>{
+    const r=best(k,hi);if(r)out.push(['n',`${r.b} has the ${t} among the selected banks (${fmt(MK[k],r.v.cur)}).`])});
+  return out;
+}
+
+/* ===== RENDER ===== */
+function render(){
+  charts.length=0;ro.disconnect();
+  const D=S.data,el=$('dash');
+  if(!D||!D.banks.length){el.innerHTML='<div class="panel empty">Load a file to begin.</div>';return}
+  const sel=S.sel.filter(b=>D.banks.includes(b));S.sel=sel;
+  const chips=`<div class="chips" role="group" aria-label="Banks to show"><span class="lbl">Banks</span>${D.banks.map(b=>`<button type="button" class="chip${sel[0]===b?' prim':''}" data-bank="${b.replace(/"/g,'&quot;')}" aria-pressed="${sel.includes(b)}"><i style="background:${col(b)}"></i>${b.replace(/</g,'&lt;')}</button>`).join('')}</div>`;
+  if(!sel.length){el.innerHTML=chips+'<div class="panel empty">Select at least one bank.</div>';return}
+  const P=sel[0],unit=S.unit?` (${S.unit.replace(/</g,'&lt;')})`:'';
+  const tiles=TILES.map(k=>{const m=MK[k],c=change(P,m),d=deltaTxt(m,c);
+    return `<div class="tile"><span class="k">${m.l}${m.t==='amt'?unit:''}</span><span class="v">${c?fmt(m,c.cur):'–'}</span><div class="row"><span class="d">${d.arrow?`<span class="gl" style="color:${d.good==null?'var(--muted)':d.good?'var(--good)':'var(--crit)'}" aria-hidden="true">${d.arrow}</span>`:''}<span>${d.txt}</span></span>${c?spark(c.hist):''}</div></div>`}).join('');
+  const kpi=`<section aria-label="Key indicators for ${P}"><p class="sub">KPI focus: <b style="color:var(--ink)">${P}</b>, latest period ${change(P,MK.dep)?change(P,MK.dep).period:(D.periods[D.periods.length-1])}. Click a bank above to change the selection; the first selected bank is the focus.</p><div class="kpis">${tiles}</div></section>`;
+  const cp=CHARTS.map(k=>`<section class="panel"><h2>${MK[k].l}</h2><p class="sub">${MK[k].t==='amt'?(S.unit||'Amount')+' per period':'% per period'}</p><div class="chart" id="ch-${k}"></div></section>`).join('');
+  // peer table
+  const cols=[['bank','Bank'],['period','Period'],...['dep','adv','cd','casa','nim','cti','gnpa','car','pat'].map(k=>[k,MK[k].l.replace(' (quarter)','')])];
+  const rows=sel.map(b=>{const o={bank:b};TILES.concat(['cd']).forEach(k=>{const c=change(b,MK[k]);o[k]=c?c.cur:null;if(c)o.period=c.period});return o});
+  const sk=S.sort.k;rows.sort((x,y)=>{if(sk==='bank'||sk==='period')return S.sort.dir*String(x[sk]??'').localeCompare(String(y[sk]??''));return S.sort.dir*((x[sk]??-Infinity)-(y[sk]??-Infinity))});
+  const bestOf={};['dep','adv','casa','nim','car','pat'].forEach(k=>bestOf[k]=Math.max(...rows.map(r=>r[k]??-Infinity)));
+  ['cti','gnpa'].forEach(k=>bestOf[k]=Math.min(...rows.map(r=>r[k]??Infinity)));
+  const tbl=`<div class="tw"><table><thead><tr>${cols.map(([k,l])=>`<th ${sk===k?`aria-sort="${S.sort.dir>0?'ascending':'descending'}"`:''}><button type="button" data-sort="${k}">${l}${sk===k?(S.sort.dir>0?' ↑':' ↓'):''}</button></th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr><td><span class="sw" style="background:${col(r.bank)}"></span>${r.bank.replace(/</g,'&lt;')}</td><td>${r.period??'–'}</td>${cols.slice(2).map(([k])=>`<td class="${rows.length>1&&r[k]!=null&&r[k]===bestOf[k]?'best':''}">${fmt(MK[k],r[k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div><p class="note">Latest period per bank. Bold marks the best value in each column among selected banks (highest, except cost-to-income and gross NPA where lowest is best). Credit-deposit ratio is not ranked.</p>`;
+  const li=a=>a.map(([t,s])=>`<li><span class="g" style="color:${t==='g'?'var(--good)':t==='b'?'var(--crit)':'var(--muted)'}" aria-hidden="true">${t==='g'?'▲':t==='b'?'▼':'•'}</span><span>${s.replace(/</g,'&lt;')}</span></li>`).join('');
+  const ins=insights(P),peer=peerInsights();
+  const raw=`<details class="dt"><summary>View data table for ${P}</summary><div class="tw"><table><thead><tr><th><button type="button" style="cursor:default">Period</button></th>${METRICS.map(m=>`<th><button type="button" style="cursor:default">${m.l.replace(' (quarter)','').replace(' (annualised)','')}</button></th>`).join('')}</tr></thead><tbody>${D.by[P].map(r=>`<tr><td>${r.period}</td>${METRICS.map(m=>`<td>${fmt(m,m.g(r))}</td>`).join('')}</tr>`).join('')}</tbody></table></div></details>`;
+  el.innerHTML=chips+kpi+`<div class="grid">${cp}</div>
+  <section class="panel" style="margin-bottom:16px"><h2>Peer comparison</h2><p class="sub">Selected banks at their latest period${unit}</p>${tbl}</section>
+  <section class="panel"><h2>Insights for ${P.replace(/</g,'&lt;')}</h2><p class="sub">Written automatically from the numbers, comparing the latest period with a year ago where available.</p><ul class="ins">${li(ins)||'<li>Not enough data to write insights.</li>'}</ul>${peer.length?`<h2 style="margin-top:16px">Across selected banks</h2><ul class="ins" style="margin-top:8px">${li(peer)}</ul>`:''}${raw}</section>`;
+  CHARTS.forEach(k=>lineChart('ch-'+k,MK[k],D.periods,sel.map(b=>({name:b,c:col(b),v:series(b,MK[k])}))));
+}
+
+/* ===== EVENTS ===== */
+document.addEventListener('click',e=>{
+  const b=e.target.closest('[data-bank]');
+  if(b){const n=b.dataset.bank,i=S.sel.indexOf(n);
+    if(i>=0){if(S.sel.length>1)S.sel.splice(i,1)}else S.sel.push(n);
+    render();const nb=document.querySelector(`[data-bank="${CSS.escape(n)}"]`);if(nb)nb.focus();return}
+  const s=e.target.closest('[data-sort]');
+  if(s){const k=s.dataset.sort;S.sort=S.sort.k===k?{k,dir:-S.sort.dir}:{k,dir:(k==='bank'||k==='period')?1:-1};render();const nb=document.querySelector(`[data-sort="${k}"]`);if(nb)nb.focus()}
+});
+$('btnFile').addEventListener('click',()=>$('file').click());
+$('btnSample').addEventListener('click',loadSample);
+$('btnPasteToggle').addEventListener('click',()=>{$('how').open=true;$('paste').focus()});
+$('btnLoad').addEventListener('click',()=>{
+  const t=$('paste').value;if(!t.trim()){setStatus('The paste box is empty.','err');return}
+  apply(tableToData(textToTable(t)),'Pasted data loaded',false);
+});
+$('unit').addEventListener('input',e=>{S.unit=e.target.value;render()});
+$('file').addEventListener('change',e=>{
+  const f=e.target.files[0];if(!f)return;
+  const ext=f.name.split('.').pop().toLowerCase(),rd=new FileReader();
+  rd.onerror=()=>setStatus('That file could not be read.','err');
+  if(ext==='xlsx'||ext==='xls'){
+    if(typeof XLSX==='undefined'){setStatus('Excel support did not load. Save the sheet as CSV and upload that instead.','err');return}
+    rd.onload=()=>{try{const wb=XLSX.read(rd.result,{type:'array'}),ws=wb.Sheets[wb.SheetNames[0]];
+      apply(tableToData(XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:''})),`Loaded ${f.name}`,false)}catch(err){setStatus('That Excel file could not be parsed.','err')}};
+    rd.readAsArrayBuffer(f);
+  }else{rd.onload=()=>apply(tableToData(textToTable(String(rd.result))),`Loaded ${f.name}`,false);rd.readAsText(f)}
+  e.target.value='';
+});
+$('btnCopy').addEventListener('click',async()=>{
+  const txt=$('tpl').textContent,done=m=>{$('copied').textContent=m;setTimeout(()=>$('copied').textContent='',2500)};
+  try{await navigator.clipboard.writeText(txt);done('Copied.')}catch(e){const r=document.createRange();r.selectNodeContents($('tpl'));const s=getSelection();s.removeAllRanges();s.addRange(r);done('Selected. Press copy.')}
+});
+
+/* ===== BOOT ===== */
+(function(){
+  const st=sampleTable();
+  $('tpl').textContent=[st[0],st[1],st[2]].map(r=>r.join(',')).join('\n')+'\n…';
+  let saved=null;try{saved=JSON.parse(localStorage.getItem('bpa-data')||'null')}catch(e){}
+  if(saved&&saved.banks&&saved.banks.length){S.data=saved;S.isSample=false;S.sel=saved.banks.slice(0,Math.min(2,saved.banks.length));
+    setStatus(`Your last loaded data: ${saved.banks.length} bank(s), ${saved.periods.length} periods.`,'ok');$('srcTag').textContent='Your data';render()}
+  else loadSample();
+})();
+</script>
